@@ -124,9 +124,10 @@ export default function YouTubePage() {
 
   useEffect(() => {
     if (url && isYouTubeUrl(url)) {
+      // 🔥 FIXED: Faster delay for YouTube
       const timeoutId = setTimeout(() => {
         fetchAvailableFormats(url);
-      }, 1500);
+      }, 500); // Reduced from 1500ms to 500ms
       return () => clearTimeout(timeoutId);
     } else {
       setAvailableFormats(null);
@@ -144,9 +145,16 @@ export default function YouTubePage() {
     };
   }, []);
 
+  // 🔥 FIXED: fetchAvailableFormats function
   const fetchAvailableFormats = async (videoUrl: string) => {
     setFetchingFormats(true);
     setError("");
+
+    // Clear previous states
+    setAvailableFormats(null);
+    setSelectedFormat("");
+    setLinkDetails(null);
+
     try {
       const response = await fetch(
         `/api/list-formats?url=${encodeURIComponent(videoUrl)}`
@@ -154,30 +162,31 @@ export default function YouTubePage() {
       const data: FormatResponse = await response.json();
 
       if (data.success) {
-        setAvailableFormats(data);
+        // Force state update with timeout
+        setTimeout(() => {
+          setAvailableFormats(data);
 
-        const contentType = detectYouTubeType(videoUrl);
+          const contentType = detectYouTubeType(videoUrl);
 
-        setLinkDetails({
-          title: data.title || "YouTube Video",
-          author: data.uploader || "YouTube Creator",
-          duration: data.duration,
-          viewCount: data.view_count,
-          platform: "youtube",
-          type: contentType,
-          thumbnail:
-            data.thumbnail ||
-            `https://img.youtube.com/vi/${extractVideoId(
-              videoUrl
-            )}/maxresdefault.jpg`,
-        });
+          setLinkDetails({
+            title: data.title || "YouTube Video",
+            author: data.uploader || "YouTube Creator",
+            duration: data.duration,
+            viewCount: data.view_count,
+            platform: "youtube",
+            type: contentType,
+            thumbnail:
+              data.thumbnail ||
+              `https://img.youtube.com/vi/${extractVideoId(
+                videoUrl
+              )}/maxresdefault.jpg`,
+          });
 
-        // Auto-select best format
-        const formatsToUse =
-          data.recommended?.length > 0 ? data.recommended : data.formats;
-        if (formatsToUse?.length > 0) {
-          setSelectedFormat(formatsToUse[0].format_id);
-        }
+          // 🔥 FIXED: Always use all formats for YouTube
+          if (data.formats?.length > 0) {
+            setSelectedFormat(data.formats[0].format_id);
+          }
+        }, 100);
       } else {
         setError(
           data.error ||
@@ -335,6 +344,18 @@ export default function YouTubePage() {
       ></div>
     </div>
   );
+
+  // 🔥 FIXED: Always show ALL YouTube formats
+  const getFormatsToDisplay = () => {
+    if (!availableFormats?.success) {
+      return [];
+    }
+
+    // Always show all formats for YouTube
+    return availableFormats.formats || [];
+  };
+
+  const formatsToDisplay = getFormatsToDisplay();
 
   return (
     <div className="container mx-auto max-w-6xl px-4">
@@ -518,89 +539,85 @@ export default function YouTubePage() {
               </GlassCard>
             )}
 
-            {/* Format Selection */}
-            {availableFormats?.formats &&
-              availableFormats.formats.length > 0 && (
-                <GlassCard className="p-6 border border-red-400/30">
-                  <div className="flex items-center space-x-3 mb-4">
-                    <Star className="text-red-400" size={20} />
-                    <h3 className="text-red-200 font-bold text-lg">
-                      Choose Quality & Format
-                    </h3>
-                    <span className="text-xs bg-red-500/20 px-3 py-1 rounded-full text-red-300">
-                      {availableFormats.formats.length} options available
-                    </span>
-                  </div>
+            {/* 🔥 FIXED: Format Selection - Always show ALL formats */}
+            {formatsToDisplay.length > 0 && (
+              <GlassCard className="p-6 border border-red-400/30">
+                <div className="flex items-center space-x-3 mb-4">
+                  <Star className="text-red-400" size={20} />
+                  <h3 className="text-red-200 font-bold text-lg">
+                    Choose Quality & Format
+                  </h3>
+                  <span className="text-xs bg-red-500/20 px-3 py-1 rounded-full text-red-300">
+                    {formatsToDisplay.length} options available
+                  </span>
+                  <span className="text-xs bg-blue-500/20 px-2 py-1 rounded-full text-blue-300">
+                    ▶️ All YouTube Formats
+                  </span>
+                </div>
 
-                  <div className="space-y-3 max-h-80 overflow-y-auto">
-                    {(availableFormats.recommended?.length > 0
-                      ? availableFormats.recommended
-                      : availableFormats.formats
-                    ).map((format) => (
-                      <label
-                        key={format.format_id}
-                        className="flex items-center space-x-4 p-4 rounded-lg hover:bg-white/5 cursor-pointer border border-red-300/20 transition-all"
-                      >
-                        <input
-                          type="radio"
-                          name="format"
-                          value={format.format_id}
-                          checked={selectedFormat === format.format_id}
-                          onChange={(e) => setSelectedFormat(e.target.value)}
-                          className="text-red-400 focus:ring-red-500 w-4 h-4"
-                        />
+                <div className="space-y-3 max-h-80 overflow-y-auto">
+                  {formatsToDisplay.map((format, index) => (
+                    <label
+                      key={`${format.format_id}-${index}`}
+                      className="flex items-center space-x-4 p-4 rounded-lg hover:bg-white/5 cursor-pointer border border-red-300/20 transition-all"
+                    >
+                      <input
+                        type="radio"
+                        name="format"
+                        value={format.format_id}
+                        checked={selectedFormat === format.format_id}
+                        onChange={(e) => setSelectedFormat(e.target.value)}
+                        className="text-red-400 focus:ring-red-500 w-4 h-4"
+                      />
 
-                        <div className="flex-1">
-                          <div className="flex items-center space-x-2 mb-1">
-                            {format.type === "audio" ? (
-                              <Headphones
-                                size={14}
-                                className="text-green-400"
-                              />
-                            ) : format.type === "video" ? (
-                              <Monitor size={14} className="text-blue-400" />
-                            ) : (
-                              <Play size={14} className="text-purple-400" />
-                            )}
-                            <span className="text-white font-medium">
-                              {format.quality} {format.ext.toUpperCase()}
+                      <div className="flex-1">
+                        <div className="flex items-center space-x-2 mb-1">
+                          {format.type === "audio" ? (
+                            <Headphones size={14} className="text-green-400" />
+                          ) : format.type === "video" ? (
+                            <Monitor size={14} className="text-blue-400" />
+                          ) : (
+                            <Play size={14} className="text-purple-400" />
+                          )}
+                          <span className="text-white font-medium">
+                            {format.quality} {format.ext.toUpperCase()}
+                          </span>
+                          {format.isRecommended && (
+                            <span className="text-xs bg-green-500/20 px-2 py-1 rounded-full text-green-300">
+                              ⭐ Recommended
                             </span>
-                            {format.isRecommended && (
-                              <span className="text-xs bg-green-500/20 px-2 py-1 rounded-full text-green-300">
-                                ⭐ Recommended
-                              </span>
-                            )}
-                            <span className="text-xs bg-gray-500/20 px-2 py-1 rounded-full text-gray-300">
-                              {format.format_id}
-                            </span>
-                          </div>
-                          <div className="text-red-200 text-sm">
-                            {format.type} •
-                            <span className="font-bold text-cyan-300">
-                              {format.filesizeMB > 0
-                                ? ` ${format.filesizeMB}MB`
-                                : ` ${format.filesize}`}
-                            </span>
-                            {format.fps && <span> • {format.fps}fps</span>}
-                            {format.type === "video" && (
-                              <span className="text-green-300">
-                                {" "}
-                                • Audio included
-                              </span>
-                            )}
-                            {format.type === "audio" && (
-                              <span className="text-yellow-300">
-                                {" "}
-                                • Audio only download
-                              </span>
-                            )}
-                          </div>
+                          )}
+                          <span className="text-xs bg-gray-500/20 px-2 py-1 rounded-full text-gray-300">
+                            {format.format_id}
+                          </span>
                         </div>
-                      </label>
-                    ))}
-                  </div>
-                </GlassCard>
-              )}
+                        <div className="text-red-200 text-sm">
+                          {format.type} •
+                          <span className="font-bold text-cyan-300">
+                            {format.filesizeMB > 0
+                              ? ` ${format.filesizeMB}MB`
+                              : ` ${format.filesize}`}
+                          </span>
+                          {format.fps && <span> • {format.fps}fps</span>}
+                          {format.type === "video" && (
+                            <span className="text-green-300">
+                              {" "}
+                              • Audio included
+                            </span>
+                          )}
+                          {format.type === "audio" && (
+                            <span className="text-yellow-300">
+                              {" "}
+                              • Audio only download
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </GlassCard>
+            )}
 
             {/* Loading State */}
             {fetchingFormats && (

@@ -91,7 +91,6 @@ export default function HomePage() {
   const [error, setError] = useState("");
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
   const [downloadId, setDownloadId] = useState<string | null>(null);
-  const [debugInfo, setDebugInfo] = useState<any>(null); // 🔥 Debug state
   const eventSourceRef = useRef<EventSource | null>(null);
 
   const detectPlatform = (url: string): string => {
@@ -116,32 +115,23 @@ export default function HomePage() {
     }
   };
 
-  // 🔥 FIXED: Immediate fetch for YouTube, shorter delay for others
   useEffect(() => {
     if (url && isValidUrl(url)) {
       const platform = detectPlatform(url);
-      console.log("🎯 Platform detected:", platform);
       
-      // Different delays for different platforms
+      // Different delays for different platforms - YouTube gets priority
       const delay = platform === 'youtube' ? 300 : platform === 'facebook' ? 800 : 1200;
       
       const timeoutId = setTimeout(() => {
-        console.log("⏰ Fetching formats for:", platform, "after", delay, "ms");
         fetchAvailableFormats(url);
       }, delay);
       
-      return () => {
-        console.log("🧹 Cleaning up timeout");
-        clearTimeout(timeoutId);
-      };
+      return () => clearTimeout(timeoutId);
     } else {
-      // Clear all states when URL is invalid
-      console.log("🧹 Clearing all states - invalid URL");
       setAvailableFormats(null);
       setSelectedFormat("");
       setError("");
       setLinkDetails(null);
-      setDebugInfo(null);
     }
   }, [url]);
 
@@ -153,13 +143,9 @@ export default function HomePage() {
     };
   }, []);
 
-  // 🔥 COMPLETELY REWRITTEN: Better state management
   const fetchAvailableFormats = async (videoUrl: string) => {
-    console.log("🚀 Starting fetchAvailableFormats for:", videoUrl);
-    
     setFetchingFormats(true);
     setError("");
-    setDebugInfo(null);
     
     // Clear previous states immediately
     setAvailableFormats(null);
@@ -167,59 +153,32 @@ export default function HomePage() {
     setLinkDetails(null);
     
     const platform = detectPlatform(videoUrl);
-    console.log("🎯 Platform:", platform);
 
     try {
       const response = await fetch(`/api/list-formats?url=${encodeURIComponent(videoUrl)}`);
-      console.log("📡 API Response status:", response.status);
       
       if (!response.ok) {
         throw new Error(`API returned ${response.status}`);
       }
 
       const data: FormatResponse = await response.json();
-      console.log("📊 Raw API Response:", data);
-
-      // 🔥 ENHANCED DEBUGGING
-      const debug = {
-        platform,
-        success: data.success,
-        title: data.title,
-        formatsCount: data.formats?.length || 0,
-        recommendedCount: data.recommended?.length || 0,
-        firstFormat: data.formats?.[0],
-        firstRecommended: data.recommended?.[0],
-        timestamp: new Date().toISOString()
-      };
-      
-      console.log("🐛 Debug info:", debug);
-      setDebugInfo(debug);
 
       if (data.success) {
-        console.log("✅ API Success - Processing data");
-        console.log("📊 Total formats received:", data.formats?.length);
-        console.log("📊 Recommended formats:", data.recommended?.length);
-        console.log("📊 First 3 formats:", data.formats?.slice(0, 3));
-
-        // 🔥 FORCE STATE UPDATE with timeout to avoid race conditions
+        // Force state update with timeout to avoid race conditions
         setTimeout(() => {
-          console.log("🔄 Setting availableFormats state");
           setAvailableFormats(data);
           
           // Set link details
-          const linkInfo = {
+          setLinkDetails({
             title: data.title,
             author: data.uploader,
             duration: data.duration,
             viewCount: data.view_count,
             platform: platform,
             thumbnail: data.thumbnail || `https://via.placeholder.com/300x200?text=${platform}`,
-          };
-          
-          console.log("🔄 Setting linkDetails:", linkInfo);
-          setLinkDetails(linkInfo);
+          });
 
-          // 🔥 BETTER AUTO-SELECTION LOGIC
+          // Better auto-selection logic
           const allFormats = data.formats || [];
           const recommendedFormats = data.recommended || [];
           
@@ -229,37 +188,30 @@ export default function HomePage() {
             // YouTube: Prefer all formats over recommended
             if (allFormats.length > 0) {
               formatToSelect = allFormats[0].format_id;
-              console.log("🎯 YouTube: Selected from all formats:", formatToSelect);
             }
           } else {
             // Other platforms: Prefer recommended
             if (recommendedFormats.length > 0) {
               formatToSelect = recommendedFormats[0].format_id;
-              console.log("🎯 Other platform: Selected from recommended:", formatToSelect);
             } else if (allFormats.length > 0) {
               formatToSelect = allFormats[0].format_id;
-              console.log("🎯 Other platform: Selected from all formats:", formatToSelect);
             }
           }
           
           if (formatToSelect) {
-            console.log("✅ Auto-selected format:", formatToSelect);
             setSelectedFormat(formatToSelect);
           }
           
-        }, 100); // Small delay to ensure state updates properly
+        }, 100);
         
       } else {
-        console.error("❌ API returned success: false");
         setError(data.error || "Could not get available formats");
         setAvailableFormats(null);
       }
     } catch (err: any) {
-      console.error("❌ Fetch error:", err);
       setError(`Failed to get format information: ${err.message}`);
       setAvailableFormats(null);
     } finally {
-      console.log("🏁 fetchAvailableFormats completed");
       setFetchingFormats(false);
     }
   };
@@ -382,12 +334,9 @@ export default function HomePage() {
     </div>
   );
 
-  // 🔥 COMPLETELY REWRITTEN: Simplified and YouTube-optimized
+  // YOUTUBE SPECIAL HANDLING: Always show ALL formats for YouTube
   const getFormatsToDisplay = () => {
-    console.log("🎯 getFormatsToDisplay called");
-    
     if (!availableFormats || !availableFormats.success) {
-      console.log("❌ No available formats or not success");
       return [];
     }
 
@@ -395,26 +344,16 @@ export default function HomePage() {
     const allFormats = availableFormats.formats || [];
     const recommendedFormats = availableFormats.recommended || [];
     
-    console.log("🎯 Display decision:", {
-      platform,
-      allFormatsCount: allFormats.length,
-      recommendedCount: recommendedFormats.length
-    });
-
-    // 🔥 YOUTUBE SPECIAL HANDLING: Always show ALL formats
+    // YouTube: Always show ALL formats
     if (platform === 'youtube') {
-      console.log("🎯 YouTube detected - showing ALL formats:", allFormats.length);
       return allFormats;
     }
     
     // Other platforms: recommended first, then all
-    const result = recommendedFormats.length > 0 ? recommendedFormats : allFormats;
-    console.log("🎯 Other platform - showing:", result.length, "formats");
-    return result;
+    return recommendedFormats.length > 0 ? recommendedFormats : allFormats;
   };
 
   const formatsToDisplay = getFormatsToDisplay();
-  console.log("🎯 Final formatsToDisplay count:", formatsToDisplay.length);
 
   return (
     <>
@@ -463,21 +402,6 @@ export default function HomePage() {
                 )}
               </div>
 
-              {/* 🔥 DEBUG INFO - Remove this in production */}
-              {debugInfo && (
-                <GlassCard className="p-4 border border-yellow-400/30 bg-yellow-500/10">
-                  <div className="text-xs text-yellow-200 space-y-1">
-                    <div><strong>🐛 Debug Info:</strong></div>
-                    <div>Platform: {debugInfo.platform}</div>
-                    <div>Success: {debugInfo.success?.toString()}</div>
-                    <div>Formats: {debugInfo.formatsCount}</div>
-                    <div>Recommended: {debugInfo.recommendedCount}</div>
-                    <div>Display: {formatsToDisplay.length}</div>
-                    <div>Time: {new Date(debugInfo.timestamp).toLocaleTimeString()}</div>
-                  </div>
-                </GlassCard>
-              )}
-
               {/* Preview */}
               {linkDetails && (
                 <GlassCard className="p-4 border border-cyan-400/30">
@@ -506,7 +430,7 @@ export default function HomePage() {
                 </GlassCard>
               )}
 
-              {/* 🔥 FORMATS DISPLAY - ALWAYS VISIBLE WHEN AVAILABLE */}
+              {/* Formats Display */}
               {formatsToDisplay.length > 0 && (
                 <GlassCard className="p-6 border border-blue-400/30">
                   <div className="flex items-center space-x-3 mb-4">
@@ -525,7 +449,7 @@ export default function HomePage() {
                   <div className="space-y-2 max-h-80 overflow-y-auto">
                     {formatsToDisplay.map((format, index) => (
                       <label
-                        key={`${format.format_id}-${index}`} // 🔥 Better key
+                        key={`${format.format_id}-${index}`}
                         className="flex items-center space-x-3 p-4 rounded-lg hover:bg-white/5 cursor-pointer border border-blue-300/20 transition-all"
                       >
                         <input
@@ -533,10 +457,7 @@ export default function HomePage() {
                           name="format"
                           value={format.format_id}
                           checked={selectedFormat === format.format_id}
-                          onChange={(e) => {
-                            console.log("🔄 Format selected:", e.target.value);
-                            setSelectedFormat(e.target.value);
-                          }}
+                          onChange={(e) => setSelectedFormat(e.target.value)}
                           className="text-blue-400 focus:ring-blue-500 w-4 h-4"
                         />
 
