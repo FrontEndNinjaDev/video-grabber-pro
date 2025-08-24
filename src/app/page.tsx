@@ -86,13 +86,12 @@ export default function HomePage() {
   const [loading, setLoading] = useState(false);
   const [fetchingFormats, setFetchingFormats] = useState(false);
   const [linkDetails, setLinkDetails] = useState<LinkDetails | null>(null);
-  const [availableFormats, setAvailableFormats] =
-    useState<FormatResponse | null>(null);
+  const [availableFormats, setAvailableFormats] = useState<FormatResponse | null>(null);
   const [selectedFormat, setSelectedFormat] = useState<string>("");
   const [error, setError] = useState("");
-  const [downloadProgress, setDownloadProgress] =
-    useState<DownloadProgress | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
   const [downloadId, setDownloadId] = useState<string | null>(null);
+  const [debugInfo, setDebugInfo] = useState<any>(null); // 🔥 Debug state
   const eventSourceRef = useRef<EventSource | null>(null);
 
   const detectPlatform = (url: string): string => {
@@ -100,13 +99,10 @@ export default function HomePage() {
     const cleanUrl = url.toLowerCase().trim();
 
     if (cleanUrl.includes("instagram.com")) return "instagram";
-    if (cleanUrl.includes("youtube.com") || cleanUrl.includes("youtu.be"))
-      return "youtube";
-    if (cleanUrl.includes("facebook.com") || cleanUrl.includes("fb.watch"))
-      return "facebook";
+    if (cleanUrl.includes("youtube.com") || cleanUrl.includes("youtu.be")) return "youtube";
+    if (cleanUrl.includes("facebook.com") || cleanUrl.includes("fb.watch")) return "facebook";
     if (cleanUrl.includes("tiktok.com")) return "tiktok";
-    if (cleanUrl.includes("twitter.com") || cleanUrl.includes("x.com"))
-      return "twitter";
+    if (cleanUrl.includes("twitter.com") || cleanUrl.includes("x.com")) return "twitter";
 
     return "universal";
   };
@@ -120,17 +116,32 @@ export default function HomePage() {
     }
   };
 
+  // 🔥 FIXED: Immediate fetch for YouTube, shorter delay for others
   useEffect(() => {
     if (url && isValidUrl(url)) {
+      const platform = detectPlatform(url);
+      console.log("🎯 Platform detected:", platform);
+      
+      // Different delays for different platforms
+      const delay = platform === 'youtube' ? 300 : platform === 'facebook' ? 800 : 1200;
+      
       const timeoutId = setTimeout(() => {
+        console.log("⏰ Fetching formats for:", platform, "after", delay, "ms");
         fetchAvailableFormats(url);
-      }, 1500);
-      return () => clearTimeout(timeoutId);
+      }, delay);
+      
+      return () => {
+        console.log("🧹 Cleaning up timeout");
+        clearTimeout(timeoutId);
+      };
     } else {
+      // Clear all states when URL is invalid
+      console.log("🧹 Clearing all states - invalid URL");
       setAvailableFormats(null);
       setSelectedFormat("");
       setError("");
       setLinkDetails(null);
+      setDebugInfo(null);
     }
   }, [url]);
 
@@ -142,52 +153,113 @@ export default function HomePage() {
     };
   }, []);
 
+  // 🔥 COMPLETELY REWRITTEN: Better state management
   const fetchAvailableFormats = async (videoUrl: string) => {
+    console.log("🚀 Starting fetchAvailableFormats for:", videoUrl);
+    
     setFetchingFormats(true);
     setError("");
-    try {
-      const response = await fetch(
-        `/api/list-formats?url=${encodeURIComponent(videoUrl)}`
-      );
-      const data: FormatResponse = await response.json();
+    setDebugInfo(null);
+    
+    // Clear previous states immediately
+    setAvailableFormats(null);
+    setSelectedFormat("");
+    setLinkDetails(null);
+    
+    const platform = detectPlatform(videoUrl);
+    console.log("🎯 Platform:", platform);
 
-      console.log("📊 API Response:", data); // Debug log
+    try {
+      const response = await fetch(`/api/list-formats?url=${encodeURIComponent(videoUrl)}`);
+      console.log("📡 API Response status:", response.status);
+      
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}`);
+      }
+
+      const data: FormatResponse = await response.json();
+      console.log("📊 Raw API Response:", data);
+
+      // 🔥 ENHANCED DEBUGGING
+      const debug = {
+        platform,
+        success: data.success,
+        title: data.title,
+        formatsCount: data.formats?.length || 0,
+        recommendedCount: data.recommended?.length || 0,
+        firstFormat: data.formats?.[0],
+        firstRecommended: data.recommended?.[0],
+        timestamp: new Date().toISOString()
+      };
+      
+      console.log("🐛 Debug info:", debug);
+      setDebugInfo(debug);
 
       if (data.success) {
-        setAvailableFormats(data);
+        console.log("✅ API Success - Processing data");
+        console.log("📊 Total formats received:", data.formats?.length);
+        console.log("📊 Recommended formats:", data.recommended?.length);
+        console.log("📊 First 3 formats:", data.formats?.slice(0, 3));
 
-        // Set link details
-        setLinkDetails({
-          title: data.title,
-          author: data.uploader,
-          duration: data.duration,
-          viewCount: data.view_count,
-          platform: detectPlatform(videoUrl),
-          thumbnail:
-            data.thumbnail ||
-            `https://via.placeholder.com/300x200?text=${detectPlatform(
-              videoUrl
-            )}`,
-        });
+        // 🔥 FORCE STATE UPDATE with timeout to avoid race conditions
+        setTimeout(() => {
+          console.log("🔄 Setting availableFormats state");
+          setAvailableFormats(data);
+          
+          // Set link details
+          const linkInfo = {
+            title: data.title,
+            author: data.uploader,
+            duration: data.duration,
+            viewCount: data.view_count,
+            platform: platform,
+            thumbnail: data.thumbnail || `https://via.placeholder.com/300x200?text=${platform}`,
+          };
+          
+          console.log("🔄 Setting linkDetails:", linkInfo);
+          setLinkDetails(linkInfo);
 
-        // 🔧 FIXED: Auto-select first format from recommended or all formats
-        const formatsToUse =
-          data.recommended && data.recommended.length > 0
-            ? data.recommended
-            : data.formats;
-        if (formatsToUse && formatsToUse.length > 0) {
-          setSelectedFormat(formatsToUse[0].format_id);
-          console.log("✅ Auto-selected format:", formatsToUse[0].format_id);
-        }
+          // 🔥 BETTER AUTO-SELECTION LOGIC
+          const allFormats = data.formats || [];
+          const recommendedFormats = data.recommended || [];
+          
+          let formatToSelect = "";
+          
+          if (platform === 'youtube') {
+            // YouTube: Prefer all formats over recommended
+            if (allFormats.length > 0) {
+              formatToSelect = allFormats[0].format_id;
+              console.log("🎯 YouTube: Selected from all formats:", formatToSelect);
+            }
+          } else {
+            // Other platforms: Prefer recommended
+            if (recommendedFormats.length > 0) {
+              formatToSelect = recommendedFormats[0].format_id;
+              console.log("🎯 Other platform: Selected from recommended:", formatToSelect);
+            } else if (allFormats.length > 0) {
+              formatToSelect = allFormats[0].format_id;
+              console.log("🎯 Other platform: Selected from all formats:", formatToSelect);
+            }
+          }
+          
+          if (formatToSelect) {
+            console.log("✅ Auto-selected format:", formatToSelect);
+            setSelectedFormat(formatToSelect);
+          }
+          
+        }, 100); // Small delay to ensure state updates properly
+        
       } else {
+        console.error("❌ API returned success: false");
         setError(data.error || "Could not get available formats");
         setAvailableFormats(null);
       }
     } catch (err: any) {
       console.error("❌ Fetch error:", err);
-      setError("Failed to get format information. Please check the URL.");
+      setError(`Failed to get format information: ${err.message}`);
       setAvailableFormats(null);
     } finally {
+      console.log("🏁 fetchAvailableFormats completed");
       setFetchingFormats(false);
     }
   };
@@ -240,9 +312,7 @@ export default function HomePage() {
       eventSourceRef.current.close();
     }
 
-    const eventSource = new EventSource(
-      `/api/download-progress?id=${downloadId}`
-    );
+    const eventSource = new EventSource(`/api/download-progress?id=${downloadId}`);
     eventSourceRef.current = eventSource;
 
     eventSource.onmessage = (event) => {
@@ -289,24 +359,16 @@ export default function HomePage() {
       facebook: Facebook,
       default: Play,
     };
-    const IconComponent =
-      iconMap[platform as keyof typeof iconMap] || iconMap.default;
+    const IconComponent = iconMap[platform as keyof typeof iconMap] || iconMap.default;
     return <IconComponent className="text-cyan-400" size={16} />;
   };
 
   const getFormatIcon = (format: VideoFormat) => {
-    const hasAudio =
-      format.acodec && format.acodec !== "none" && format.acodec !== null;
+    const hasAudio = format.acodec && format.acodec !== "none" && format.acodec !== null;
 
-    if (format.type === "audio")
-      return <Music size={14} className="text-green-400" />;
-
-    // 🔧 REMOVED: VolumeX mute icon - now all videos get audio automatically
-    if (format.type === "video")
-      return <Video size={14} className="text-blue-400" />;
-
-    if (format.type === "video+audio" || hasAudio)
-      return <Play size={14} className="text-purple-400" />;
+    if (format.type === "audio") return <Music size={14} className="text-green-400" />;
+    if (format.type === "video") return <Video size={14} className="text-blue-400" />;
+    if (format.type === "video+audio" || hasAudio) return <Play size={14} className="text-purple-400" />;
 
     return <Download size={14} className="text-gray-400" />;
   };
@@ -320,45 +382,55 @@ export default function HomePage() {
     </div>
   );
 
-  // 🔧 FIXED: Get formats to display - use recommended first, then all formats
+  // 🔥 COMPLETELY REWRITTEN: Simplified and YouTube-optimized
   const getFormatsToDisplay = () => {
-    if (!availableFormats?.success) return [];
-
-    // Try recommended first, then all formats
-    if (
-      availableFormats.recommended &&
-      availableFormats.recommended.length > 0
-    ) {
-      return availableFormats.recommended;
+    console.log("🎯 getFormatsToDisplay called");
+    
+    if (!availableFormats || !availableFormats.success) {
+      console.log("❌ No available formats or not success");
+      return [];
     }
 
-    if (availableFormats.formats && availableFormats.formats.length > 0) {
-      return availableFormats.formats;
-    }
+    const platform = detectPlatform(url);
+    const allFormats = availableFormats.formats || [];
+    const recommendedFormats = availableFormats.recommended || [];
+    
+    console.log("🎯 Display decision:", {
+      platform,
+      allFormatsCount: allFormats.length,
+      recommendedCount: recommendedFormats.length
+    });
 
-    return [];
+    // 🔥 YOUTUBE SPECIAL HANDLING: Always show ALL formats
+    if (platform === 'youtube') {
+      console.log("🎯 YouTube detected - showing ALL formats:", allFormats.length);
+      return allFormats;
+    }
+    
+    // Other platforms: recommended first, then all
+    const result = recommendedFormats.length > 0 ? recommendedFormats : allFormats;
+    console.log("🎯 Other platform - showing:", result.length, "formats");
+    return result;
   };
 
   const formatsToDisplay = getFormatsToDisplay();
+  console.log("🎯 Final formatsToDisplay count:", formatsToDisplay.length);
 
   return (
     <>
       <div className="container mx-auto max-w-5xl px-4">
         <OceanBackground />
+        
         {/* Hero Section */}
         <div className="text-center mb-12">
           <div className="mb-4">
-            <Waves
-              className="mx-auto mb-3 text-cyan-400 animate-pulse"
-              size={40}
-            />
+            <Waves className="mx-auto mb-3 text-cyan-400 animate-pulse" size={40} />
           </div>
-          <h1 className="text-4xl md:text-6xl font-bold text-white mb-4   ">
+          <h1 className="text-4xl md:text-6xl font-bold text-white mb-4">
             Video Grabber Pro
           </h1>
           <p className="text-lg md:text-xl text-blue-100 max-w-3xl mx-auto leading-relaxed">
-            Universal downloader with format selection • Real-time progress •
-            Direct to browser
+            Universal downloader with format selection • Real-time progress • Direct to browser
           </p>
         </div>
 
@@ -369,12 +441,8 @@ export default function HomePage() {
               <div className="inline-flex items-center justify-center w-12 h-12 bg-gradient-to-r from-cyan-500 to-blue-500 rounded-full mb-3">
                 <Download className="text-white" size={20} />
               </div>
-              <h2 className="text-2xl font-bold text-white mb-2 ">
-                Video Grabber Pro
-              </h2>
-              <p className="text-blue-100">
-                Choose format • Track progress • Download with audio
-              </p>
+              <h2 className="text-2xl font-bold text-white mb-2">Video Grabber Pro</h2>
+              <p className="text-blue-100">Choose format • Track progress • Download with audio</p>
             </div>
 
             <div className="space-y-6">
@@ -395,6 +463,21 @@ export default function HomePage() {
                 )}
               </div>
 
+              {/* 🔥 DEBUG INFO - Remove this in production */}
+              {debugInfo && (
+                <GlassCard className="p-4 border border-yellow-400/30 bg-yellow-500/10">
+                  <div className="text-xs text-yellow-200 space-y-1">
+                    <div><strong>🐛 Debug Info:</strong></div>
+                    <div>Platform: {debugInfo.platform}</div>
+                    <div>Success: {debugInfo.success?.toString()}</div>
+                    <div>Formats: {debugInfo.formatsCount}</div>
+                    <div>Recommended: {debugInfo.recommendedCount}</div>
+                    <div>Display: {formatsToDisplay.length}</div>
+                    <div>Time: {new Date(debugInfo.timestamp).toLocaleTimeString()}</div>
+                  </div>
+                </GlassCard>
+              )}
+
               {/* Preview */}
               {linkDetails && (
                 <GlassCard className="p-4 border border-cyan-400/30">
@@ -404,54 +487,45 @@ export default function HomePage() {
                       alt="Preview"
                       className="w-20 h-20 rounded-lg object-cover border border-blue-300/30"
                       onError={(e) => {
-                        (e.target as HTMLImageElement).src =
-                          "https://via.placeholder.com/80x80?text=🌐";
+                        (e.target as HTMLImageElement).src = "https://via.placeholder.com/80x80?text=🌐";
                       }}
                     />
                     <div className="flex-1 min-w-0">
-                      <h3 className="text-white font-bold text-sm mb-1">
-                        {linkDetails.title}
-                      </h3>
+                      <h3 className="text-white font-bold text-sm mb-1">{linkDetails.title}</h3>
                       <div className="flex items-center space-x-3 text-xs text-blue-200">
                         <div className="flex items-center space-x-1">
                           {getPlatformIcon(linkDetails.platform)}
-                          <span className="capitalize">
-                            {linkDetails.platform}
-                          </span>
+                          <span className="capitalize">{linkDetails.platform}</span>
                         </div>
-                        {linkDetails.author && (
-                          <span>• {linkDetails.author}</span>
-                        )}
-                        {linkDetails.duration && (
-                          <span>• {linkDetails.duration}</span>
-                        )}
-                        {linkDetails.viewCount && (
-                          <span>• {linkDetails.viewCount} views</span>
-                        )}
+                        {linkDetails.author && <span>• {linkDetails.author}</span>}
+                        {linkDetails.duration && <span>• {linkDetails.duration}</span>}
+                        {linkDetails.viewCount && <span>• {linkDetails.viewCount} views</span>}
                       </div>
                     </div>
                   </div>
                 </GlassCard>
               )}
 
-              {/* 🔧 FIXED: Show Formats Immediately - NO CONDITIONAL RENDERING */}
+              {/* 🔥 FORMATS DISPLAY - ALWAYS VISIBLE WHEN AVAILABLE */}
               {formatsToDisplay.length > 0 && (
                 <GlassCard className="p-6 border border-blue-400/30">
                   <div className="flex items-center space-x-3 mb-4">
                     <List className="text-blue-400" size={20} />
-                    <span className="text-blue-200 font-bold">
-                      Available Formats
-                    </span>
+                    <span className="text-blue-200 font-bold">Available Formats</span>
                     <span className="text-xs bg-blue-500/20 px-2 py-1 rounded-full text-blue-300">
                       {formatsToDisplay.length} found
                     </span>
+                    {detectPlatform(url) === 'youtube' && (
+                      <span className="text-xs bg-red-500/20 px-2 py-1 rounded-full text-red-300">
+                        ▶️ YouTube
+                      </span>
+                    )}
                   </div>
 
-                  {/* 🚀 ALWAYS SHOW FORMATS - No hiding, no toggling */}
                   <div className="space-y-2 max-h-80 overflow-y-auto">
-                    {formatsToDisplay.map((format) => (
+                    {formatsToDisplay.map((format, index) => (
                       <label
-                        key={format.format_id}
+                        key={`${format.format_id}-${index}`} // 🔥 Better key
                         className="flex items-center space-x-3 p-4 rounded-lg hover:bg-white/5 cursor-pointer border border-blue-300/20 transition-all"
                       >
                         <input
@@ -459,7 +533,10 @@ export default function HomePage() {
                           name="format"
                           value={format.format_id}
                           checked={selectedFormat === format.format_id}
-                          onChange={(e) => setSelectedFormat(e.target.value)}
+                          onChange={(e) => {
+                            console.log("🔄 Format selected:", e.target.value);
+                            setSelectedFormat(e.target.value);
+                          }}
                           className="text-blue-400 focus:ring-blue-500 w-4 h-4"
                         />
 
@@ -482,20 +559,9 @@ export default function HomePage() {
                           <div className="text-blue-200 text-xs">
                             {format.type} •
                             <span className="font-bold text-cyan-300">
-                              {" "}
-                              {format.filesizeMB > 0
-                                ? `${format.filesizeMB}MB`
-                                : format.filesize}
+                              {" "}{format.filesizeMB > 0 ? `${format.filesizeMB}MB` : format.filesize}
                             </span>
                             {format.fps && <span> • {format.fps}fps</span>}
-                            {/* 🔧 UPDATED: Better messaging for video formats */}
-                            {format.type === "video" &&
-                              (!format.acodec || format.acodec === "none") && (
-                                <span className="text-green-300 font-medium">
-                                  {" "}
-                                  • Audio included
-                                </span>
-                              )}
                           </div>
                         </div>
                       </label>
@@ -509,9 +575,7 @@ export default function HomePage() {
                 <GlassCard className="p-6 border border-blue-400/30">
                   <div className="flex items-center justify-center space-x-3">
                     <Loader2 className="animate-spin text-cyan-400" size={20} />
-                    <span className="text-blue-200">
-                      Getting available formats...
-                    </span>
+                    <span className="text-blue-200">Getting available formats...</span>
                   </div>
                 </GlassCard>
               )}
@@ -522,9 +586,7 @@ export default function HomePage() {
                   <div className="space-y-4">
                     <div className="flex items-center space-x-3">
                       <Activity className="text-cyan-400" size={20} />
-                      <span className="text-cyan-200 font-bold">
-                        Download Progress
-                      </span>
+                      <span className="text-cyan-200 font-bold">Download Progress</span>
                       <span className="text-xs bg-cyan-500/20 px-2 py-1 rounded-full text-cyan-300 capitalize">
                         {downloadProgress.status}
                       </span>
@@ -546,16 +608,12 @@ export default function HomePage() {
                       <ProgressBar percentage={downloadProgress.percentage} />
 
                       <div className="flex justify-between items-center text-xs text-blue-200">
-                        {downloadProgress.downloaded &&
-                          downloadProgress.totalSize && (
-                            <div className="flex items-center space-x-2">
-                              <HardDrive size={12} />
-                              <span>
-                                {downloadProgress.downloaded} of{" "}
-                                {downloadProgress.totalSize}
-                              </span>
-                            </div>
-                          )}
+                        {downloadProgress.downloaded && downloadProgress.totalSize && (
+                          <div className="flex items-center space-x-2">
+                            <HardDrive size={12} />
+                            <span>{downloadProgress.downloaded} of {downloadProgress.totalSize}</span>
+                          </div>
+                        )}
 
                         {downloadProgress.eta && (
                           <div className="flex items-center space-x-2 text-yellow-300">
@@ -568,18 +626,14 @@ export default function HomePage() {
 
                     {downloadProgress.message && (
                       <div className="bg-blue-500/20 rounded-lg p-3">
-                        <p className="text-blue-200 text-sm">
-                          {downloadProgress.message}
-                        </p>
+                        <p className="text-blue-200 text-sm">{downloadProgress.message}</p>
                       </div>
                     )}
 
                     {downloadProgress.status === "completed" && (
                       <div className="flex items-center space-x-2 text-green-300">
                         <CheckCircle size={16} />
-                        <span className="font-medium">
-                          Download completed! File sent to browser.
-                        </span>
+                        <span className="font-medium">Download completed! File sent to browser.</span>
                       </div>
                     )}
                   </div>
@@ -589,12 +643,7 @@ export default function HomePage() {
               {/* Download Button */}
               <button
                 onClick={handleDownload}
-                disabled={
-                  loading ||
-                  !url.trim() ||
-                  !selectedFormat ||
-                  formatsToDisplay.length === 0
-                }
+                disabled={loading || !url.trim() || !selectedFormat || formatsToDisplay.length === 0}
                 className="w-full py-4 bg-gradient-to-r from-cyan-500 to-blue-500 text-white font-bold text-lg rounded-xl hover:from-cyan-600 hover:to-blue-600 transition-all duration-300 transform hover:scale-[1.02] shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center space-x-3"
               >
                 {loading ? (
@@ -606,9 +655,10 @@ export default function HomePage() {
                   <>
                     <Download size={24} />
                     <span>
-                      {selectedFormat
-                        ? `Download ${selectedFormat}`
-                        : "Select Format to Download"}
+                      {selectedFormat 
+                        ? `Download ${selectedFormat}` 
+                        : "Select Format to Download"
+                      }
                     </span>
                     <Sparkles size={20} />
                   </>
@@ -618,10 +668,7 @@ export default function HomePage() {
               {/* Error Display */}
               {error && (
                 <div className="flex items-start space-x-3 p-4 bg-red-500/20 border border-red-400/40 rounded-xl">
-                  <XCircle
-                    className="text-red-300 flex-shrink-0 mt-1"
-                    size={20}
-                  />
+                  <XCircle className="text-red-300 flex-shrink-0 mt-1" size={20} />
                   <div className="flex-1">
                     <div className="text-red-200 text-sm">{error}</div>
                     {url && (
@@ -644,17 +691,13 @@ export default function HomePage() {
         <div className="grid md:grid-cols-4 gap-4 mb-8">
           <GlassCard className="p-4 text-center hover:scale-105 transition-transform duration-300">
             <List className="mx-auto mb-2 text-cyan-400" size={24} />
-            <h4 className="text-sm font-bold text-white mb-1">
-              Instant Format Display
-            </h4>
+            <h4 className="text-sm font-bold text-white mb-1">Instant Format Display</h4>
             <p className="text-blue-200 text-xs">See all formats immediately</p>
           </GlassCard>
 
           <GlassCard className="p-4 text-center hover:scale-105 transition-transform duration-300">
             <Activity className="mx-auto mb-2 text-green-400" size={24} />
-            <h4 className="text-sm font-bold text-white mb-1">
-              Real-Time Progress
-            </h4>
+            <h4 className="text-sm font-bold text-white mb-1">Real-Time Progress</h4>
             <p className="text-blue-200 text-xs">Live download tracking</p>
           </GlassCard>
 
@@ -666,9 +709,7 @@ export default function HomePage() {
 
           <GlassCard className="p-4 text-center hover:scale-105 transition-transform duration-300">
             <Download className="mx-auto mb-2 text-yellow-400" size={24} />
-            <h4 className="text-sm font-bold text-white mb-1">
-              Browser Download
-            </h4>
+            <h4 className="text-sm font-bold text-white mb-1">Browser Download</h4>
             <p className="text-blue-200 text-xs">Direct to Downloads folder</p>
           </GlassCard>
         </div>
